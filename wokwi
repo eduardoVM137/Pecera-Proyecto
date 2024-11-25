@@ -1,0 +1,101 @@
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
+#include <HTTPClient.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <uri/UriBraces.h>
+
+#define WIFI_SSID "Wokwi-GUEST"
+#define WIFI_PASSWORD ""
+#define WIFI_CHANNEL 6
+
+// Dirección de tu API
+const char* API_URL = "http://192.168.1.100:3000/envio/temperatura"; // Cambia la IP por la de tu servidor
+
+// Configuración del sensor DS18B20
+#define ONE_WIRE_BUS 4 // Pin para el sensor
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+
+// Configuración del servidor web
+WebServer server(80);
+
+// Función para enviar datos a la API
+void sendToAPI(float temperature) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+
+    // Crear payload JSON
+    String jsonPayload = "{\"temperatura\":" + String(temperature) + "}";
+
+    // Iniciar conexión HTTP
+    http.begin(API_URL);
+    http.addHeader("Content-Type", "application/json");
+
+    // Enviar POST
+    int httpResponseCode = http.POST(jsonPayload);
+
+    // Verificar respuesta
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println("Datos enviados exitosamente");
+      Serial.print("Respuesta del servidor: ");
+      Serial.println(response);
+    } else {
+      Serial.print("Error al enviar datos. Código HTTP: ");
+      Serial.println(httpResponseCode);
+    }
+
+    http.end();
+  } else {
+    Serial.println("No conectado a WiFi");
+  }
+}
+
+// Función para manejar solicitudes web
+void handleRoot() {
+  sensors.requestTemperatures();
+  float temperature = sensors.getTempCByIndex(0);
+
+  if (temperature == DEVICE_DISCONNECTED_C) {
+    server.send(500, "text/plain", "Error al leer el sensor de temperatura");
+    return;
+  }
+
+  String response = "Temperatura actual: " + String(temperature) + " °C";
+  server.send(200, "text/plain", response);
+
+  // Enviar temperatura a la API
+  sendToAPI(temperature);
+}
+
+void setup(void) {
+  Serial.begin(115200);
+
+  // Iniciar conexión WiFi
+  Serial.print("Conectando a WiFi...");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD, WIFI_CHANNEL);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(100);
+    Serial.print(".");
+  }
+  Serial.println(" Conectado!");
+
+  Serial.print("Dirección IP: ");
+  Serial.println(WiFi.localIP());
+
+  // Iniciar sensor de temperatura
+  sensors.begin();
+
+  // Configurar endpoint del servidor web
+  server.on("/", handleRoot);
+
+  // Iniciar servidor web
+  server.begin();
+  Serial.println("Servidor HTTP iniciado");
+}
+
+void loop(void) {
+  server.handleClient();
+}
